@@ -1,0 +1,74 @@
+import streamlit as st
+from io import BytesIO
+from PyPDF2 import PdfReader
+import fitz  # PyMuPDF
+import hashlib
+
+def extract_text_from_pdf(pdf_file):
+    reader = PdfReader(BytesIO(pdf_file))
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text()
+    return text
+
+def extract_images_from_pdf(pdf_file):
+    doc = fitz.open(stream=pdf_file, filetype="pdf")
+    image_hashes = []
+    for page_num in range(len(doc)):
+        for img_index, img in enumerate(doc[page_num].get_images(full=True)):
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            img_hash = hashlib.md5(image_bytes).hexdigest()
+            image_hashes.append(img_hash)
+    return image_hashes
+
+def compare_pdfs(pdf_files):
+    pdf_data = {}
+
+    for file_name, pdf_file in pdf_files.items():
+        text = extract_text_from_pdf(pdf_file)
+        images = extract_images_from_pdf(pdf_file)
+        pdf_data[file_name] = {
+            "text": hashlib.md5(text.encode()).hexdigest(),
+            "images": set(images),
+        }
+
+    results = []
+    unique_texts = set()
+    unique_images = set()
+
+    for file_name, data in pdf_data.items():
+        text_hash = data["text"]
+        image_hashes = data["images"]
+
+        text_duplicate = text_hash in unique_texts
+        image_duplicate = image_hashes & unique_images
+
+        results.append({
+            "file": file_name,
+            "text_duplicate": text_duplicate,
+            "image_duplicate": bool(image_duplicate),
+        })
+
+        unique_texts.add(text_hash)
+        unique_images.update(image_hashes)
+
+    return results
+
+# Streamlit UI
+st.title("PDF Uniqueness Checker")
+
+uploaded_files = st.file_uploader("Upload PDF files", type=["pdf"], accept_multiple_files=True)
+
+if uploaded_files:
+    pdf_files = {file.name: file.read() for file in uploaded_files}
+    st.write("Uploaded files:", list(pdf_files.keys()))
+
+    if st.button("Check Uniqueness"):
+        results = compare_pdfs(pdf_files)
+        for result in results:
+            st.write(f"File: {result['file']}")
+            st.write(f" - Text Duplicate: {'Yes' if result['text_duplicate'] else 'No'}")
+            st.write(f" - Image Duplicate: {'Yes' if result['image_duplicate'] else 'No'}")
+
